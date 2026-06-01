@@ -33,12 +33,15 @@ import {
 import {main} from '../wailsjs/go/models';
 import {
     CheckTools,
-    GetDefaults,
+    IsAutoLaunchEnabled,
     IsRunning,
     ListInterfaces,
+    LoadConfig,
+    SaveConfig,
     SelectDirectory,
     SelectIconFile,
     ServerInfo,
+    SetAutoLaunch,
     StartServer,
     StopServer,
 } from '../wailsjs/go/main/App';
@@ -69,6 +72,7 @@ const EMPTY_CONFIG = main.Config.createFrom({
     ignoreUnreadable: false,
     noProbe: false,
     noTranscode: false,
+    autoStartServer: false,
 });
 
 function App() {
@@ -81,9 +85,12 @@ function App() {
     const [logs, setLogs] = useState<string[]>([]);
     const [logOpen, setLogOpen] = useState(false);
     const [tools, setTools] = useState<main.Tools>(new main.Tools({ffmpeg: true, ffprobe: true}));
+    const [loaded, setLoaded] = useState(false);
+    const [autoLaunch, setAutoLaunch] = useState(false);
 
     const viewportRef = useRef<HTMLDivElement>(null);
     const measureRef = useRef<HTMLDivElement>(null);
+    const autoStartedRef = useRef(false);
 
     const appendLog = (line: string) =>
         setLogs((prev) => {
@@ -94,16 +101,25 @@ function App() {
     const setField = <K extends keyof main.Config>(key: K, value: main.Config[K]) =>
         setCfg((prev) => main.Config.createFrom({...prev, [key]: value}));
 
-    // Load defaults, interfaces, version and live state on mount. Tool detection
-    // forces the probe/transcode toggles when ffprobe/ffmpeg are unavailable.
+    // Restore the saved config, interfaces, version and live state on mount.
+    // Tool detection still forces the probe/transcode toggles when ffprobe/ffmpeg
+    // are unavailable, even if the saved config had them off. A stale saved
+    // interface (renamed/removed since last run) falls back to Auto.
     useEffect(() => {
-        Promise.all([GetDefaults(), CheckTools()]).then(([d, t]) => {
+        Promise.all([LoadConfig(), CheckTools(), ListInterfaces()]).then(([saved, t, ifs]) => {
             setTools(t);
-            setCfg(main.Config.createFrom({...d, noProbe: !t.ffprobe, noTranscode: !t.ffmpeg}));
+            setInterfaces(ifs);
+            setCfg(main.Config.createFrom({
+                ...saved,
+                noProbe: saved.noProbe || !t.ffprobe,
+                noTranscode: saved.noTranscode || !t.ffmpeg,
+            }));
+            setIface(saved.ifname && ifs.includes(saved.ifname) ? saved.ifname : AUTO_IFACE);
+            setLoaded(true);
         });
-        ListInterfaces().then(setInterfaces);
         ServerInfo().then(setInfo);
         IsRunning().then(setRunning);
+        IsAutoLaunchEnabled().then(setAutoLaunch);
 
         EventsOn('dms:log', (line: string) => appendLog(line));
         EventsOn('dms:status', (s: {running: boolean; message: string}) => {
@@ -116,6 +132,21 @@ function App() {
             EventsOff('dms:status');
         };
     }, []);
+
+    // Persist the form on every control change, debounced so rapid typing does
+    // not thrash the disk. Skipped until the initial load completes so we never
+    // overwrite the saved file with empty/default values.
+    useEffect(() => {
+        if (!loaded) return;
+        const payload = main.Config.createFrom({
+            ...cfg,
+            ifname: iface === AUTO_IFACE ? '' : iface,
+        });
+        const id = setTimeout(() => {
+            SaveConfig(payload);
+        }, 500);
+        return () => clearTimeout(id);
+    }, [cfg, iface, loaded]);
 
     // Match the window height to the actual rendered content so there is no
     // empty space when the log is collapsed and no clipping when it expands.
@@ -170,6 +201,27 @@ function App() {
         } finally {
             setBusy(false);
         }
+    };
+
+    // When the saved config asks for it, start the server once after the initial
+    // load resolves — so an app opened at login (or reopened) begins serving
+    // without a click. The ref guard keeps it to a single attempt.
+    useEffect(() => {
+        if (!loaded || autoStartedRef.current) return;
+        if (cfg.autoStartServer && cfg.path && !running) {
+            autoStartedRef.current = true;
+            start();
+        }
+    }, [loaded, cfg.autoStartServer, cfg.path, running]);
+
+    const toggleAutoLaunch = async (enable: boolean) => {
+        try {
+            await SetAutoLaunch(enable);
+        } catch (e: any) {
+            appendLog(`>>> ERROR: ${e}`);
+        }
+        // Reflect the real OS state, not the optimistic checkbox value.
+        IsAutoLaunchEnabled().then(setAutoLaunch);
     };
 
     const ifaceData = [
@@ -339,6 +391,22 @@ function App() {
                                             allowDeselect={false}
                                         />
                                     </Tooltip>
+
+                                    <Divider label="Startup" labelPosition="left"/>
+
+                                    <Checkbox
+                                        label="Launch DMS on system startup"
+                                        description="Open the app automatically when you log in"
+                                        checked={autoLaunch}
+                                        onChange={(e) => toggleAutoLaunch(e.currentTarget.checked)}
+                                    />
+                                    <Checkbox
+                                        label="Start server automatically on launch"
+                                        description="Begin serving as soon as the app opens (needs a media folder)"
+                                        checked={cfg.autoStartServer}
+                                        onChange={(e) => setField('autoStartServer', e.currentTarget.checked)}
+                                        disabled={running}
+                                    />
                                 </Stack>
                             </Accordion.Panel>
                         </Accordion.Item>

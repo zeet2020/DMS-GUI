@@ -38,6 +38,7 @@ type Config struct {
 	IgnoreUnreadable bool   `json:"ignoreUnreadable"`
 	NoProbe          bool   `json:"noProbe"`
 	NoTranscode      bool   `json:"noTranscode"`
+	AutoStartServer  bool   `json:"autoStartServer"`
 }
 
 // Tools reports which external media tools are available on PATH. dms needs
@@ -89,6 +90,89 @@ func (a *App) GetDefaults() Config {
 		HTTPPort:         ":1338",
 		FFprobeCachePath: filepath.Join(home, ".dms-ffprobe-cache"),
 	}
+}
+
+// settingsPath returns the JSON file where the form configuration is persisted,
+// e.g. ~/.config/dms-gui/config.json on Linux.
+func settingsPath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "dms-gui", "config.json"), nil
+}
+
+// LoadConfig returns the last saved form configuration, falling back to
+// GetDefaults when nothing has been saved yet (or the file is unreadable).
+func (a *App) LoadConfig() Config {
+	path, err := settingsPath()
+	if err != nil {
+		return a.GetDefaults()
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return a.GetDefaults()
+	}
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return a.GetDefaults()
+	}
+	return cfg
+}
+
+// SaveConfig persists the current form configuration so it can be restored on
+// the next launch. The write is atomic (temp file + rename).
+func (a *App) SaveConfig(cfg Config) error {
+	path, err := settingsPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return atomicWriteFile(path, data, 0o644)
+}
+
+// IsAutoLaunchEnabled reports whether the app is registered to launch at login.
+// The OS autostart artifact (file or registry value) is the source of truth.
+func (a *App) IsAutoLaunchEnabled() bool {
+	enabled, err := isAutoLaunchEnabled()
+	if err != nil {
+		return false
+	}
+	return enabled
+}
+
+// SetAutoLaunch registers or removes the OS autostart entry for this app.
+func (a *App) SetAutoLaunch(enable bool) error {
+	return setAutoLaunch(enable)
+}
+
+// atomicWriteFile writes data to path via a temp file + rename so a reader never
+// sees a partially written file.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), perm); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 // ListInterfaces returns the names of usable network interfaces for SSDP.

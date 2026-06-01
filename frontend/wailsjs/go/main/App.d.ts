@@ -6,15 +6,23 @@ export function CheckTools():Promise<main.Tools>;
 
 export function GetDefaults():Promise<main.Config>;
 
+export function IsAutoLaunchEnabled():Promise<boolean>;
+
 export function IsRunning():Promise<boolean>;
 
 export function ListInterfaces():Promise<Array<string>>;
+
+export function LoadConfig():Promise<main.Config>;
+
+export function SaveConfig(arg1:main.Config):Promise<void>;
 
 export function SelectDirectory():Promise<string>;
 
 export function SelectIconFile():Promise<string>;
 
 export function ServerInfo():Promise<string>;
+
+export function SetAutoLaunch(arg1:boolean):Promise<void>;
 
 export function StartServer(arg1:main.Config):Promise<void>;
 

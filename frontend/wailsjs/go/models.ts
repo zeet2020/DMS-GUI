@@ -13,6 +13,7 @@ export namespace main {
 	    ignoreUnreadable: boolean;
 	    noProbe: boolean;
 	    noTranscode: boolean;
+	    autoStartServer: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -32,6 +33,7 @@ export namespace main {
 	        this.ignoreUnreadable = source["ignoreUnreadable"];
 	        this.noProbe = source["noProbe"];
 	        this.noTranscode = source["noTranscode"];
+	        this.autoStartServer = source["autoStartServer"];
 	    }
 	}
 	export class Tools {

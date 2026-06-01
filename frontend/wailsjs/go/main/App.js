@@ -10,12 +10,24 @@ export function GetDefaults() {
   return window['go']['main']['App']['GetDefaults']();
 }
 
+export function IsAutoLaunchEnabled() {
+  return window['go']['main']['App']['IsAutoLaunchEnabled']();
+}
+
 export function IsRunning() {
   return window['go']['main']['App']['IsRunning']();
 }
 
 export function ListInterfaces() {
   return window['go']['main']['App']['ListInterfaces']();
+}
+
+export function LoadConfig() {
+  return window['go']['main']['App']['LoadConfig']();
+}
+
+export function SaveConfig(arg1) {
+  return window['go']['main']['App']['SaveConfig'](arg1);
 }
 
 export function SelectDirectory() {
@@ -28,6 +40,10 @@ export function SelectIconFile() {
 
 export function ServerInfo() {
   return window['go']['main']['App']['ServerInfo']();
+}
+
+export function SetAutoLaunch(arg1) {
+  return window['go']['main']['App']['SetAutoLaunch'](arg1);
 }
 
 export function StartServer(arg1) {
