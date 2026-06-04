@@ -1,4 +1,15 @@
-build/bin
+# Build output
+.task
+bin
+
+# Frontend
 frontend/dist
 frontend/node_modules
-/dms-gui
+
+# Generated at build time (wails3 task ...)
+*.syso
+build/linux/dms-gui.desktop
+build/linux/appimage/build
+build/linux/appimage/dms-gui
+build/linux/appimage/dms-gui.png
+build/windows/nsis/MicrosoftEdgeWebview2Setup.exe

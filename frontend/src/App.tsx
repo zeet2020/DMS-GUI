@@ -30,7 +30,7 @@ import {
     IconServer2,
     IconTrash,
 } from '@tabler/icons-react';
-import {main} from '../wailsjs/go/models';
+import {Events, Window} from '@wailsio/runtime';
 import {
     CheckTools,
     IsAutoLaunchEnabled,
@@ -44,8 +44,8 @@ import {
     SetAutoLaunch,
     StartServer,
     StopServer,
-} from '../wailsjs/go/main/App';
-import {EventsOff, EventsOn, WindowSetSize} from '../wailsjs/runtime/runtime';
+} from '../bindings/dms-gui/app';
+import {Config, Tools} from '../bindings/dms-gui/models';
 
 const AUTO_IFACE = '__auto__';
 const MAX_LOG_LINES = 2000;
@@ -59,7 +59,7 @@ const TRANSCODE_TARGETS = [
     {value: 'web', label: 'Web'},
 ];
 
-const EMPTY_CONFIG = main.Config.createFrom({
+const EMPTY_CONFIG = Config.createFrom({
     path: '',
     httpPort: ':1338',
     friendlyName: '',
@@ -76,7 +76,7 @@ const EMPTY_CONFIG = main.Config.createFrom({
 });
 
 function App() {
-    const [cfg, setCfg] = useState<main.Config>(EMPTY_CONFIG);
+    const [cfg, setCfg] = useState<Config>(EMPTY_CONFIG);
     const [iface, setIface] = useState<string>(AUTO_IFACE);
     const [interfaces, setInterfaces] = useState<string[]>([]);
     const [running, setRunning] = useState(false);
@@ -84,7 +84,7 @@ function App() {
     const [info, setInfo] = useState('');
     const [logs, setLogs] = useState<string[]>([]);
     const [logOpen, setLogOpen] = useState(false);
-    const [tools, setTools] = useState<main.Tools>(new main.Tools({ffmpeg: true, ffprobe: true}));
+    const [tools, setTools] = useState<Tools>(new Tools({ffmpeg: true, ffprobe: true}));
     const [loaded, setLoaded] = useState(false);
     const [autoLaunch, setAutoLaunch] = useState(false);
 
@@ -98,8 +98,8 @@ function App() {
             return next.length > MAX_LOG_LINES ? next.slice(next.length - MAX_LOG_LINES) : next;
         });
 
-    const setField = <K extends keyof main.Config>(key: K, value: main.Config[K]) =>
-        setCfg((prev) => main.Config.createFrom({...prev, [key]: value}));
+    const setField = <K extends keyof Config>(key: K, value: Config[K]) =>
+        setCfg((prev) => Config.createFrom({...prev, [key]: value}));
 
     // Restore the saved config, interfaces, version and live state on mount.
     // Tool detection still forces the probe/transcode toggles when ffprobe/ffmpeg
@@ -109,7 +109,7 @@ function App() {
         Promise.all([LoadConfig(), CheckTools(), ListInterfaces()]).then(([saved, t, ifs]) => {
             setTools(t);
             setInterfaces(ifs);
-            setCfg(main.Config.createFrom({
+            setCfg(Config.createFrom({
                 ...saved,
                 noProbe: saved.noProbe || !t.ffprobe,
                 noTranscode: saved.noTranscode || !t.ffmpeg,
@@ -121,15 +121,16 @@ function App() {
         IsRunning().then(setRunning);
         IsAutoLaunchEnabled().then(setAutoLaunch);
 
-        EventsOn('dms:log', (line: string) => appendLog(line));
-        EventsOn('dms:status', (s: {running: boolean; message: string}) => {
+        const offLog = Events.On('dms:log', (e: any) => appendLog(e.data));
+        const offStatus = Events.On('dms:status', (e: any) => {
+            const s = e.data as {running: boolean; message: string};
             setRunning(s.running);
             appendLog(`>>> ${s.message}`);
         });
 
         return () => {
-            EventsOff('dms:log');
-            EventsOff('dms:status');
+            offLog();
+            offStatus();
         };
     }, []);
 
@@ -138,7 +139,7 @@ function App() {
     // overwrite the saved file with empty/default values.
     useEffect(() => {
         if (!loaded) return;
-        const payload = main.Config.createFrom({
+        const payload = Config.createFrom({
             ...cfg,
             ifname: iface === AUTO_IFACE ? '' : iface,
         });
@@ -153,7 +154,7 @@ function App() {
     useEffect(() => {
         const el = measureRef.current;
         if (!el || !('ResizeObserver' in window)) return;
-        const fit = () => WindowSetSize(WINDOW_WIDTH, Math.ceil(el.getBoundingClientRect().height));
+        const fit = () => Window.SetSize(WINDOW_WIDTH, Math.ceil(el.getBoundingClientRect().height));
         const ro = new ResizeObserver(fit);
         ro.observe(el);
         fit();
@@ -180,7 +181,7 @@ function App() {
     const start = async () => {
         setBusy(true);
         try {
-            const payload = main.Config.createFrom({
+            const payload = Config.createFrom({
                 ...cfg,
                 ifname: iface === AUTO_IFACE ? '' : iface,
             });

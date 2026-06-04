@@ -32,19 +32,20 @@ binary — no separate `dms` install required.
 ## Development
 
 ```sh
-wails dev
+wails3 dev
 ```
 
-Runs a Vite dev server with hot reload. Go methods are also reachable from the browser
-devtools at http://localhost:34115.
+Runs a Vite dev server with hot reload. Right-click the window and choose *Inspect* to open
+the webview devtools, where the bound Go methods are also reachable.
 
 ## Building
 
 ```sh
-wails build
+wails3 build          # binary into bin/
+wails3 task package   # platform installer/bundle (AppImage, NSIS, .app)
 ```
 
-Produces a redistributable binary in `build/bin/`. CI (`.github/workflows/build.yml`) builds a
+Produces a redistributable binary in `bin/`. CI (`.github/workflows/build.yml`) builds a
 Linux AppImage, a Windows `.exe`, and a macOS universal `.app`; pushing a `v*` tag publishes a
 GitHub release with all three.
 

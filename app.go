@@ -19,7 +19,7 @@ import (
 
 	dmslib "github.com/anacrolix/dms/dlna/dms"
 	"github.com/anacrolix/dms/rrcache"
-	rt "github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 const dmsVersion = "anacrolix/dms v1.7.2 (embedded)"
@@ -48,9 +48,9 @@ type Tools struct {
 	Ffprobe bool `json:"ffprobe"`
 }
 
-// App struct holds the embedded dms server and Wails context.
+// App struct holds the embedded dms server and the Wails application handle.
 type App struct {
-	ctx       context.Context
+	app       *application.App
 	mu        sync.Mutex
 	srv       *dmslib.Server
 	running   bool
@@ -66,15 +66,16 @@ func NewApp() *App {
 	return a
 }
 
-// startup is called when the app starts. The context is saved
-// so we can call the runtime methods.
-func (a *App) startup(ctx context.Context) {
-	a.ctx = ctx
+// ServiceStartup is the Wails v3 service lifecycle hook. It captures the running
+// application handle so the service can emit events and open native dialogs.
+func (a *App) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
+	a.app = application.Get()
+	return nil
 }
 
-// shutdown stops the dms server if the window is closed while running.
-func (a *App) shutdown(ctx context.Context) {
-	_ = a.StopServer()
+// ServiceShutdown stops the dms server when the application exits.
+func (a *App) ServiceShutdown() error {
+	return a.StopServer()
 }
 
 // ServerInfo reports the embedded dms version (no external binary needed).
@@ -194,9 +195,11 @@ func (a *App) ListInterfaces() []string {
 
 // SelectDirectory opens a native folder picker and returns the chosen path.
 func (a *App) SelectDirectory() (string, error) {
-	return rt.OpenDirectoryDialog(a.ctx, rt.OpenDialogOptions{
-		Title: "Select media folder to share",
-	})
+	return a.app.Dialog.OpenFile().
+		CanChooseDirectories(true).
+		CanChooseFiles(false).
+		SetTitle("Select media folder to share").
+		PromptForSingleSelection()
 }
 
 // CheckTools reports whether ffmpeg/ffprobe are on PATH so the UI can disable
@@ -214,10 +217,11 @@ func (a *App) CheckTools() Tools {
 
 // SelectIconFile opens a native picker limited to PNG images for the device icon.
 func (a *App) SelectIconFile() (string, error) {
-	return rt.OpenFileDialog(a.ctx, rt.OpenDialogOptions{
-		Title:   "Select device icon (PNG)",
-		Filters: []rt.FileFilter{{DisplayName: "PNG images (*.png)", Pattern: "*.png"}},
-	})
+	return a.app.Dialog.OpenFile().
+		CanChooseFiles(true).
+		AddFilter("PNG images (*.png)", "*.png").
+		SetTitle("Select device icon (PNG)").
+		PromptForSingleSelection()
 }
 
 // IsRunning reports whether the embedded server is currently active.
@@ -275,7 +279,7 @@ func (a *App) StartServer(cfg Config) error {
 	cache := newFileCache()
 	if cfg.FFprobeCachePath != "" {
 		if err := cache.load(cfg.FFprobeCachePath); err != nil && !os.IsNotExist(err) {
-			rt.EventsEmit(a.ctx, "dms:log", fmt.Sprintf(">>> ffprobe cache not loaded: %v", err))
+			a.emitLog(fmt.Sprintf(">>> ffprobe cache not loaded: %v", err))
 		}
 	}
 
@@ -297,7 +301,7 @@ func (a *App) StartServer(cfg Config) error {
 
 	if cfg.DeviceIcon != "" {
 		if icons, err := buildIcons(cfg.DeviceIcon); err != nil {
-			rt.EventsEmit(a.ctx, "dms:log", fmt.Sprintf(">>> device icon ignored: %v", err))
+			a.emitLog(fmt.Sprintf(">>> device icon ignored: %v", err))
 		} else {
 			srv.Icons = icons
 		}
@@ -324,7 +328,7 @@ func (a *App) StartServer(cfg Config) error {
 
 		if path != "" {
 			if err := cache.save(path); err != nil {
-				rt.EventsEmit(a.ctx, "dms:log", fmt.Sprintf(">>> ffprobe cache not saved: %v", err))
+				a.emitLog(fmt.Sprintf(">>> ffprobe cache not saved: %v", err))
 			}
 		}
 
@@ -350,11 +354,18 @@ func (a *App) StopServer() error {
 	return a.srv.Close()
 }
 
+// emitLog forwards a single log line to the frontend as a "dms:log" event.
+func (a *App) emitLog(line string) {
+	if a.app != nil {
+		a.app.Event.Emit("dms:log", line)
+	}
+}
+
 func (a *App) emitStatus(running bool, message string) {
-	if a.ctx == nil {
+	if a.app == nil {
 		return
 	}
-	rt.EventsEmit(a.ctx, "dms:status", map[string]interface{}{
+	a.app.Event.Emit("dms:status", map[string]interface{}{
 		"running": running,
 		"message": message,
 	})
@@ -380,8 +391,8 @@ func (w *logEmitter) Write(p []byte) (int, error) {
 		}
 		line := string(bytes.TrimRight(w.buf[:i], "\r"))
 		w.buf = append(w.buf[:0], w.buf[i+1:]...)
-		if line != "" && w.app.ctx != nil {
-			rt.EventsEmit(w.app.ctx, "dms:log", line)
+		if line != "" {
+			w.app.emitLog(line)
 		}
 	}
 	return len(p), nil
