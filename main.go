@@ -15,6 +15,7 @@ var assets embed.FS
 var icon []byte
 
 func main() {
+	ensureWebKitSandbox()
 	app := NewApp()
 
 	wailsApp := application.New(application.Options{

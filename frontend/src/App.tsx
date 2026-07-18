@@ -458,7 +458,7 @@ function App() {
                 </Tooltip>
             </Group>
 
-            <Collapse in={logOpen}>
+            <Collapse expanded={logOpen}>
                 <Paper withBorder radius="md" style={{height: 320, overflow: 'hidden'}}>
                     <ScrollArea h="100%" viewportRef={viewportRef} className="dms-log">
                         <Code block style={{background: 'transparent', fontSize: 12, whiteSpace: 'pre-wrap'}}>

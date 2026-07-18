@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  WAILS3_VERSION: v3.0.0-alpha.98
+  WAILS3_VERSION: v3.0.0-alpha2.117
   GO_VERSION: '1.25'
   NODE_VERSION: '24'
 

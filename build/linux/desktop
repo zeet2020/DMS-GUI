@@ -1,7 +1,7 @@
 [Desktop Entry]
 Version=1.0
-Name=My Product
-Comment=A dms-gui application
+Name=DMS
+Comment=UPnP/DLNA media server
 # The Exec line includes %u to pass the URL to the application
 Exec=/usr/local/bin/dms-gui %u
 Terminal=false
