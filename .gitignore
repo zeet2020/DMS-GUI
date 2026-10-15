@@ -13,3 +13,4 @@ build/linux/appimage/build
 build/linux/appimage/dms-gui
 build/linux/appimage/dms-gui.png
 build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
+.oui.txt.cache

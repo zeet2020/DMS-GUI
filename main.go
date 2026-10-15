@@ -47,6 +47,13 @@ func main() {
 		MinHeight:        360,
 		BackgroundColour: application.NewRGB(27, 38, 54),
 		URL:              "/",
+		// The frontend keeps window height fitted to content via Window.SetSize
+		// (see App.tsx's ResizeObserver); user-driven resize/maximise fights that,
+		// so both are disabled. DisableResize also disables the maximise button on
+		// Linux (MaximiseButtonState is a no-op there); the explicit state below
+		// covers Windows/macOS.
+		DisableResize:       true,
+		MaximiseButtonState: application.ButtonDisabled,
 	})
 
 	// Closing the window hides it to the system tray instead of quitting, so the

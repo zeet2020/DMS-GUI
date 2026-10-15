@@ -3,6 +3,7 @@ import {
     Accordion,
     ActionIcon,
     Badge,
+    Box,
     Button,
     Checkbox,
     Code,
@@ -10,6 +11,7 @@ import {
     Container,
     Divider,
     Group,
+    Modal,
     Paper,
     ScrollArea,
     Select,
@@ -23,16 +25,19 @@ import {
 import {
     IconAdjustmentsHorizontal,
     IconChevronRight,
+    IconDevices,
     IconFolderOpen,
     IconPhoto,
     IconPlayerPlayFilled,
     IconPlayerStopFilled,
+    IconRefresh,
     IconServer2,
     IconTrash,
 } from '@tabler/icons-react';
 import {Events, Window} from '@wailsio/runtime';
 import {
     CheckTools,
+    DiscoverHosts,
     IsAutoLaunchEnabled,
     IsRunning,
     ListInterfaces,
@@ -45,7 +50,7 @@ import {
     StartServer,
     StopServer,
 } from '../bindings/dms-gui/app';
-import {Config, Tools} from '../bindings/dms-gui/models';
+import {Config, DiscoveredHost, Tools} from '../bindings/dms-gui/models';
 
 const AUTO_IFACE = '__auto__';
 const MAX_LOG_LINES = 2000;
@@ -60,7 +65,7 @@ const TRANSCODE_TARGETS = [
 ];
 
 const EMPTY_CONFIG = Config.createFrom({
-    path: '',
+    paths: [],
     httpPort: ':1338',
     friendlyName: '',
     ifname: '',
@@ -87,6 +92,9 @@ function App() {
     const [tools, setTools] = useState<Tools>(new Tools({ffmpeg: true, ffprobe: true}));
     const [loaded, setLoaded] = useState(false);
     const [autoLaunch, setAutoLaunch] = useState(false);
+    const [discovering, setDiscovering] = useState(false);
+    const [discovered, setDiscovered] = useState<DiscoveredHost[]>([]);
+    const [devicesModalOpen, setDevicesModalOpen] = useState(false);
 
     const viewportRef = useRef<HTMLDivElement>(null);
     const measureRef = useRef<HTMLDivElement>(null);
@@ -111,6 +119,7 @@ function App() {
             setInterfaces(ifs);
             setCfg(Config.createFrom({
                 ...saved,
+                paths: saved.paths ?? [],
                 noProbe: saved.noProbe || !t.ffprobe,
                 noTranscode: saved.noTranscode || !t.ffmpeg,
             }));
@@ -168,14 +177,54 @@ function App() {
         if (vp) vp.scrollTo({top: vp.scrollHeight});
     }, [logs, logOpen]);
 
-    const browse = async () => {
+    const paths = cfg.paths ?? [];
+    const sharedPaths = paths.map((p) => p.trim()).filter(Boolean);
+    // dms can only transcode from a single on-disk root, so the backend turns
+    // transcoding off when more than one folder is shared; mirror that here.
+    const multiFolder = sharedPaths.length > 1;
+
+    const addFolder = async () => {
         const dir = await SelectDirectory();
-        if (dir) setField('path', dir);
+        if (dir && !paths.includes(dir)) setField('paths', [...paths, dir]);
     };
+
+    const setPath = (i: number, value: string) =>
+        setField('paths', paths.map((p, j) => (j === i ? value : p)));
+
+    const removePath = (i: number) => setField('paths', paths.filter((_, j) => j !== i));
 
     const browseIcon = async () => {
         const file = await SelectIconFile();
         if (file) setField('deviceIcon', file);
+    };
+
+    // Scans the local network (ARP table + SSDP + Cast) so the user can
+    // identify a device by hostname/vendor/OS before adding its IP to the
+    // allow list.
+    const discover = async () => {
+        setDiscovering(true);
+        try {
+            setDiscovered(await DiscoverHosts());
+        } catch (e: any) {
+            appendLog(`>>> ERROR: ${e}`);
+        } finally {
+            setDiscovering(false);
+        }
+    };
+
+    const openDevicesModal = () => {
+        setDevicesModalOpen(true);
+        if (!discovering && discovered.length === 0) discover();
+    };
+
+    const allowedIpList = cfg.allowedIps.split(',').map((s) => s.trim()).filter(Boolean);
+
+    // Checkbox state mirrors membership in cfg.allowedIps directly, so
+    // checking/unchecking a device updates the manual text field live —
+    // there's no separate staged selection to commit.
+    const toggleAllowedIp = (ip: string) => {
+        const next = allowedIpList.includes(ip) ? allowedIpList.filter((x) => x !== ip) : [...allowedIpList, ip];
+        setField('allowedIps', next.join(', '));
     };
 
     const start = async () => {
@@ -209,11 +258,11 @@ function App() {
     // without a click. The ref guard keeps it to a single attempt.
     useEffect(() => {
         if (!loaded || autoStartedRef.current) return;
-        if (cfg.autoStartServer && cfg.path && !running) {
+        if (cfg.autoStartServer && sharedPaths.length > 0 && !running) {
             autoStartedRef.current = true;
             start();
         }
-    }, [loaded, cfg.autoStartServer, cfg.path, running]);
+    }, [loaded, cfg.autoStartServer, sharedPaths.length, running]);
 
     const toggleAutoLaunch = async (enable: boolean) => {
         try {
@@ -230,7 +279,7 @@ function App() {
         ...interfaces.map((n) => ({value: n, label: n})),
     ];
 
-    const canStart = !running && !busy && cfg.path !== '';
+    const canStart = !running && !busy && sharedPaths.length > 0;
 
     return (
         <Container size="md" py="md" ref={measureRef}>
@@ -247,23 +296,52 @@ function App() {
 
             <Paper withBorder shadow="xs" p="md" radius="md">
                 <Stack gap="sm">
-                    <Group align="flex-end" gap="xs" wrap="nowrap">
-                        <TextInput
-                            label="Media folder to share"
-                            placeholder="/path/to/media"
-                            value={cfg.path}
-                            onChange={(e) => setField('path', e.currentTarget.value)}
-                            style={{flex: 1}}
-                        />
-                        <Button
-                            variant="default"
-                            leftSection={<IconFolderOpen size={16}/>}
-                            onClick={browse}
-                            disabled={running}
-                        >
-                            Browse
-                        </Button>
-                    </Group>
+                    <Stack gap={6}>
+                        <Group justify="space-between" align="center">
+                            <Text size="sm" fw={500}>Media folders to share</Text>
+                            <Button
+                                variant="default"
+                                size="xs"
+                                leftSection={<IconFolderOpen size={14}/>}
+                                onClick={addFolder}
+                                disabled={running}
+                            >
+                                Add folder
+                            </Button>
+                        </Group>
+                        {paths.length === 0 ? (
+                            <Text size="sm" c="dimmed">No folders yet. Add one to start sharing.</Text>
+                        ) : (
+                            paths.map((p, i) => (
+                                <Group key={i} gap="xs" wrap="nowrap">
+                                    <TextInput
+                                        placeholder="/path/to/media"
+                                        value={p}
+                                        onChange={(e) => setPath(i, e.currentTarget.value)}
+                                        disabled={running}
+                                        style={{flex: 1}}
+                                    />
+                                    <Tooltip label="Remove folder">
+                                        <ActionIcon
+                                            variant="subtle"
+                                            color="gray"
+                                            onClick={() => removePath(i)}
+                                            disabled={running}
+                                            aria-label="Remove folder"
+                                        >
+                                            <IconTrash size={16}/>
+                                        </ActionIcon>
+                                    </Tooltip>
+                                </Group>
+                            ))
+                        )}
+                        {multiFolder && (
+                            <Text size="xs" c="dimmed">
+                                Each folder appears as its own top-level folder on the TV. Transcoding is off with
+                                multiple folders.
+                            </Text>
+                        )}
+                    </Stack>
 
                     <Group grow align="flex-start">
                         <TextInput
@@ -297,6 +375,13 @@ function App() {
                             value={cfg.allowedIps}
                             onChange={(e) => setField('allowedIps', e.currentTarget.value)}
                             disabled={running}
+                            rightSection={
+                                <Tooltip label="Browse devices on network">
+                                    <ActionIcon variant="subtle" color="gray" onClick={openDevicesModal} disabled={running}>
+                                        <IconDevices size={16}/>
+                                    </ActionIcon>
+                                </Tooltip>
+                            }
                         />
                     </Group>
 
@@ -323,12 +408,17 @@ function App() {
                                 disabled={running || !tools.ffprobe}
                             />
                         </Tooltip>
-                        <Tooltip label="ffmpeg is not installed — transcoding unavailable" disabled={tools.ffmpeg}>
+                        <Tooltip
+                            label={!tools.ffmpeg
+                                ? 'ffmpeg is not installed — transcoding unavailable'
+                                : 'Transcoding is not supported with multiple folders'}
+                            disabled={tools.ffmpeg && !multiFolder}
+                        >
                             <Checkbox
                                 label="No transcode"
-                                checked={!tools.ffmpeg || cfg.noTranscode}
+                                checked={!tools.ffmpeg || multiFolder || cfg.noTranscode}
                                 onChange={(e) => setField('noTranscode', e.currentTarget.checked)}
-                                disabled={running || !tools.ffmpeg}
+                                disabled={running || !tools.ffmpeg || multiFolder}
                             />
                         </Tooltip>
                     </Group>
@@ -379,8 +469,10 @@ function App() {
                                     />
 
                                     <Tooltip
-                                        label="Uncheck 'No transcode' to force a target"
-                                        disabled={tools.ffmpeg && !cfg.noTranscode}
+                                        label={multiFolder
+                                            ? 'Transcoding is not supported with multiple folders'
+                                            : "Uncheck 'No transcode' to force a target"}
+                                        disabled={tools.ffmpeg && !cfg.noTranscode && !multiFolder}
                                     >
                                         <Select
                                             label="Force transcode to"
@@ -388,7 +480,7 @@ function App() {
                                             data={TRANSCODE_TARGETS}
                                             value={cfg.forceTranscodeTo ?? ''}
                                             onChange={(v) => setField('forceTranscodeTo', v ?? '')}
-                                            disabled={running || cfg.noTranscode || !tools.ffmpeg}
+                                            disabled={running || cfg.noTranscode || !tools.ffmpeg || multiFolder}
                                             allowDeselect={false}
                                         />
                                     </Tooltip>
@@ -437,6 +529,84 @@ function App() {
                     </Group>
                 </Stack>
             </Paper>
+
+            <Modal
+                opened={devicesModalOpen}
+                onClose={() => setDevicesModalOpen(false)}
+                title="Allowed client IPs"
+                size="lg"
+            >
+                <Stack gap="sm">
+                    <TextInput
+                        label="Manually enter IPs"
+                        placeholder="comma separated, blank = all"
+                        value={cfg.allowedIps}
+                        onChange={(e) => setField('allowedIps', e.currentTarget.value)}
+                        disabled={running}
+                    />
+
+                    <Group justify="space-between" align="center">
+                        <Text size="sm" fw={600} c="dimmed">Devices on network</Text>
+                        <Tooltip label="Rescan">
+                            <ActionIcon variant="subtle" color="gray" loading={discovering} onClick={discover}>
+                                <IconRefresh size={16}/>
+                            </ActionIcon>
+                        </Tooltip>
+                    </Group>
+
+                    {discovering ? (
+                        <Text size="sm" c="dimmed">Scanning network…</Text>
+                    ) : discovered.length === 0 ? (
+                        <Text size="sm" c="dimmed">No devices found. Try rescanning.</Text>
+                    ) : (
+                        <ScrollArea.Autosize mah={180} type="auto" scrollbarSize={8}>
+                            <Stack gap={6} pr="md" style={{minWidth: 0}}>
+                                {discovered.map((h) => {
+                                    const checked = allowedIpList.includes(h.ip);
+                                    // Prefer an authoritative identity (SSDP/Cast device description) over the
+                                    // hostname, and prefer a real manufacturer/model over the MAC's OUI vendor
+                                    // guess (which only identifies the Wi-Fi chip maker, not the branded device).
+                                    const primary = h.friendlyName || h.hostname || 'Unknown device';
+                                    const detail = [h.manufacturer, h.model].filter(Boolean).join(' ') || h.vendor || h.osGuess;
+                                    const full = `${h.ip} — ${primary}${detail ? ' · ' + detail : ''}`;
+                                    return (
+                                        <Group key={h.ip} gap={8} wrap="nowrap" style={{width: '100%', minWidth: 0}}>
+                                            <Checkbox
+                                                checked={checked}
+                                                disabled={running}
+                                                onChange={() => toggleAllowedIp(h.ip)}
+                                                style={{flexShrink: 0}}
+                                            />
+                                            <Tooltip label={full} openDelay={400}>
+                                                <Box
+                                                    onClick={() => !running && toggleAllowedIp(h.ip)}
+                                                    style={{
+                                                        flex: 1,
+                                                        minWidth: 0,
+                                                        whiteSpace: 'nowrap',
+                                                        overflow: 'hidden',
+                                                        textOverflow: 'ellipsis',
+                                                        cursor: running ? 'default' : 'pointer',
+                                                    }}
+                                                >
+                                                    <Text component="span" size="xs" ff="monospace" mr={6}>{h.ip}</Text>
+                                                    <Text component="span" size="sm">
+                                                        {primary}{detail ? ` · ${detail}` : ''}
+                                                    </Text>
+                                                </Box>
+                                            </Tooltip>
+                                        </Group>
+                                    );
+                                })}
+                            </Stack>
+                        </ScrollArea.Autosize>
+                    )}
+
+                    <Group justify="flex-end" mt="xs">
+                        <Button color="teal" onClick={() => setDevicesModalOpen(false)}>Done</Button>
+                    </Group>
+                </Stack>
+            </Modal>
 
             <Group justify="space-between" align="center" mt="md" mb="xs">
                 <UnstyledButton onClick={() => setLogOpen((o) => !o)}>

@@ -8,5 +8,6 @@ export {
 
 export {
     Config,
+    DiscoveredHost,
     Tools
 } from "./models.js";

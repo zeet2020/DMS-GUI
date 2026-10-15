@@ -9,7 +9,7 @@ import { Create as $Create } from "@wailsio/runtime";
  * Config mirrors the dms command-line flags that the GUI exposes.
  */
 export class Config {
-    "path": string;
+    "paths": string[];
     "httpPort": string;
     "friendlyName": string;
     "ifname": string;
@@ -25,8 +25,8 @@ export class Config {
 
     /** Creates a new Config instance. */
     constructor($$source: Partial<Config> = {}) {
-        if (!("path" in $$source)) {
-            this["path"] = "";
+        if (!("paths" in $$source)) {
+            this["paths"] = [];
         }
         if (!("httpPort" in $$source)) {
             this["httpPort"] = "";
@@ -72,8 +72,66 @@ export class Config {
      * Creates a new Config instance from a string or object.
      */
     static createFrom($$source: any = {}): Config {
+        const $$createField0_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("paths" in $$parsedSource) {
+            $$parsedSource["paths"] = $$createField0_0($$parsedSource["paths"]);
+        }
         return new Config($$parsedSource as Partial<Config>);
+    }
+}
+
+/**
+ * DiscoveredHost is a device found on the local network during a discovery
+ * scan, shown so the user can identify it before adding its IP to the
+ * allowed-clients list.
+ */
+export class DiscoveredHost {
+    "ip": string;
+    "mac": string;
+    "vendor": string;
+    "hostname": string;
+    "friendlyName": string;
+    "manufacturer": string;
+    "model": string;
+    "osGuess": string;
+
+    /** Creates a new DiscoveredHost instance. */
+    constructor($$source: Partial<DiscoveredHost> = {}) {
+        if (!("ip" in $$source)) {
+            this["ip"] = "";
+        }
+        if (!("mac" in $$source)) {
+            this["mac"] = "";
+        }
+        if (!("vendor" in $$source)) {
+            this["vendor"] = "";
+        }
+        if (!("hostname" in $$source)) {
+            this["hostname"] = "";
+        }
+        if (!("friendlyName" in $$source)) {
+            this["friendlyName"] = "";
+        }
+        if (!("manufacturer" in $$source)) {
+            this["manufacturer"] = "";
+        }
+        if (!("model" in $$source)) {
+            this["model"] = "";
+        }
+        if (!("osGuess" in $$source)) {
+            this["osGuess"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DiscoveredHost instance from a string or object.
+     */
+    static createFrom($$source: any = {}): DiscoveredHost {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DiscoveredHost($$parsedSource as Partial<DiscoveredHost>);
     }
 }
 
@@ -105,3 +163,6 @@ export class Tools {
         return new Tools($$parsedSource as Partial<Tools>);
     }
 }
+
+// Private type creation functions
+const $$createType0 = $Create.Array($Create.Any);

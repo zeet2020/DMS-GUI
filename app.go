@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/png"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -15,30 +16,28 @@ import (
 	"sync"
 	"time"
 
-	analog "github.com/anacrolix/log"
-
 	dmslib "github.com/anacrolix/dms/dlna/dms"
 	"github.com/anacrolix/dms/rrcache"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-const dmsVersion = "anacrolix/dms v1.7.2 (embedded)"
+const dmsVersion = "anacrolix/dms v1.8.0 (embedded)"
 
 // Config mirrors the dms command-line flags that the GUI exposes.
 type Config struct {
-	Path             string `json:"path"`
-	HTTPPort         string `json:"httpPort"`
-	FriendlyName     string `json:"friendlyName"`
-	Ifname           string `json:"ifname"`
-	AllowedIps       string `json:"allowedIps"`
-	DeviceIcon       string `json:"deviceIcon"`
-	FFprobeCachePath string `json:"ffprobeCachePath"`
-	ForceTranscodeTo string `json:"forceTranscodeTo"`
-	IgnoreHidden     bool   `json:"ignoreHidden"`
-	IgnoreUnreadable bool   `json:"ignoreUnreadable"`
-	NoProbe          bool   `json:"noProbe"`
-	NoTranscode      bool   `json:"noTranscode"`
-	AutoStartServer  bool   `json:"autoStartServer"`
+	Paths            []string `json:"paths"`
+	HTTPPort         string   `json:"httpPort"`
+	FriendlyName     string   `json:"friendlyName"`
+	Ifname           string   `json:"ifname"`
+	AllowedIps       string   `json:"allowedIps"`
+	DeviceIcon       string   `json:"deviceIcon"`
+	FFprobeCachePath string   `json:"ffprobeCachePath"`
+	ForceTranscodeTo string   `json:"forceTranscodeTo"`
+	IgnoreHidden     bool     `json:"ignoreHidden"`
+	IgnoreUnreadable bool     `json:"ignoreUnreadable"`
+	NoProbe          bool     `json:"noProbe"`
+	NoTranscode      bool     `json:"noTranscode"`
+	AutoStartServer  bool     `json:"autoStartServer"`
 }
 
 // Tools reports which external media tools are available on PATH. dms needs
@@ -87,7 +86,7 @@ func (a *App) ServerInfo() string {
 func (a *App) GetDefaults() Config {
 	home, _ := os.UserHomeDir()
 	return Config{
-		Path:             home,
+		Paths:            []string{home},
 		HTTPPort:         ":1338",
 		FFprobeCachePath: filepath.Join(home, ".dms-ffprobe-cache"),
 	}
@@ -117,6 +116,15 @@ func (a *App) LoadConfig() Config {
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return a.GetDefaults()
+	}
+	// Configs saved before multi-folder support hold a single "path".
+	if len(cfg.Paths) == 0 {
+		var legacy struct {
+			Path string `json:"path"`
+		}
+		if json.Unmarshal(data, &legacy) == nil && legacy.Path != "" {
+			cfg.Paths = []string{legacy.Path}
+		}
 	}
 	return cfg
 }
@@ -241,7 +249,13 @@ func (a *App) StartServer(cfg Config) error {
 	if a.running {
 		return fmt.Errorf("server already running")
 	}
-	if cfg.Path == "" {
+	var paths []string
+	for _, p := range cfg.Paths {
+		if p = strings.TrimSpace(p); p != "" {
+			paths = append(paths, filepath.Clean(p))
+		}
+	}
+	if len(paths) == 0 {
 		return fmt.Errorf("no media folder selected")
 	}
 
@@ -273,8 +287,10 @@ func (a *App) StartServer(cfg Config) error {
 		fmt.Fprintf(a.logw, ">>> allowed clients: %s\n", strings.TrimSpace(cfg.AllowedIps))
 	}
 
-	logger := analog.NewLogger("dms").WithFilterLevel(analog.Debug)
-	logger.SetHandlers(analog.StreamHandler{W: a.logw, Fmt: analog.LineFormatter})
+	logger := slog.New(slog.NewTextHandler(a.logw, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	// Some dms packages (ssdp, transcode) log via the global slog logger
+	// rather than Server.Logger; route those into the GUI log too.
+	slog.SetDefault(logger)
 
 	cache := newFileCache()
 	if cfg.FFprobeCachePath != "" {
@@ -288,15 +304,31 @@ func (a *App) StartServer(cfg Config) error {
 		Interfaces:       pickInterfaces(cfg.Ifname),
 		HTTPConn:         listener,
 		FriendlyName:     cfg.FriendlyName,
-		RootObjectPath:   filepath.Clean(cfg.Path),
+		RootObjectPath:   paths[0],
 		FFProbeCache:     cache,
 		NoTranscode:      cfg.NoTranscode,
 		ForceTranscodeTo: cfg.ForceTranscodeTo,
 		NoProbe:          cfg.NoProbe,
 		IgnoreHidden:     cfg.IgnoreHidden,
 		IgnoreUnreadable: cfg.IgnoreUnreadable,
-		AllowedIpNets:    makeIpNets(cfg.AllowedIps),
-		NotifyInterval:   30 * time.Second,
+		// ipFilterListener already enforces the allow list on every connection
+		// (including IPv6 clients matched by MAC), so dms's own SOAP-only check
+		// must not re-reject what the listener admitted.
+		AllowedIpNets:  makeIpNets(""),
+		NotifyInterval: 30 * time.Second,
+	}
+
+	// dms resolves transcode paths against a single on-disk root
+	// (filepath.Join(rootPath, path)), so with several folders it would hand
+	// ffmpeg virtual paths that don't exist. Serve them through multiFS and
+	// stream originals only.
+	if len(paths) > 1 {
+		srv.FS = newMultiFS(paths)
+		srv.NoTranscode = true
+		srv.ForceTranscodeTo = ""
+		if !cfg.NoTranscode {
+			a.emitLog(">>> transcoding disabled: not supported with multiple folders")
+		}
 	}
 
 	if cfg.DeviceIcon != "" {
@@ -339,7 +371,7 @@ func (a *App) StartServer(cfg Config) error {
 		a.emitStatus(false, msg)
 	}()
 
-	a.emitStatus(true, fmt.Sprintf("Serving %q on %s", cfg.Path, port))
+	a.emitStatus(true, fmt.Sprintf("Serving %s on %s", strings.Join(paths, ", "), port))
 	return nil
 }
 
@@ -537,7 +569,14 @@ func (l *ipFilterListener) Accept() (net.Conn, error) {
 		if i := strings.IndexByte(host, '%'); i >= 0 { // strip IPv6 zone
 			host = host[:i]
 		}
-		if l.allowAll || ipInNets(net.ParseIP(host), l.nets) {
+		ip := net.ParseIP(host)
+		// Loopback is always allowed, unlogged: dms 1.8 runs ffprobe against
+		// its own HTTP server at 127.0.0.1 once per file, so denying it breaks
+		// media probing and logging it floods the log.
+		if ip.IsLoopback() {
+			return c, nil
+		}
+		if l.allowAll || ipInNets(ip, l.nets) || ipv6AllowedByMAC(ip, l.nets) {
 			l.logf("access ALLOW %s", host)
 			return c, nil
 		}
@@ -552,6 +591,41 @@ func ipInNets(ip net.IP, nets []*net.IPNet) bool {
 	}
 	for _, n := range nets {
 		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// ipv6AllowedByMAC admits an IPv6 client whose MAC also owns an allowed IPv4
+// address. dms advertises over IPv6 SSDP too, so a TV allow-listed by its IPv4
+// address may connect from its IPv6 address instead.
+// ponytail: neighbor table is only IPv6-aware on Linux (`ip neigh`); macOS
+// (`ndp -an`) and Windows (`netsh interface ipv6 show neighbors`) need their own readers.
+func ipv6AllowedByMAC(ip net.IP, nets []*net.IPNet) bool {
+	if ip == nil || ip.To4() != nil {
+		return false
+	}
+	entries, err := readARPTable()
+	if err != nil {
+		return false
+	}
+	return macSharesAllowedIP(ip, entries, nets)
+}
+
+func macSharesAllowedIP(ip net.IP, entries []arpEntry, nets []*net.IPNet) bool {
+	var mac string
+	for _, e := range entries {
+		if ip.Equal(net.ParseIP(e.IP)) {
+			mac = e.MAC
+			break
+		}
+	}
+	if mac == "" {
+		return false
+	}
+	for _, e := range entries {
+		if e.MAC == mac && ipInNets(net.ParseIP(e.IP), nets) {
 			return true
 		}
 	}

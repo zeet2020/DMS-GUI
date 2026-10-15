@@ -25,11 +25,27 @@ export function CheckTools(): $CancellablePromise<$models.Tools> {
 }
 
 /**
+ * DiscoverHosts scans the local network so the user can identify devices —
+ * smart TVs and Cast-enabled Android TVs in particular — before typing an IP
+ * into the allow list. Best-effort, not a full inventory: the ARP/neighbor
+ * table only holds hosts this machine has recently talked to, SSDP/Cast only
+ * reach devices that speak those protocols, reverse DNS only resolves names
+ * the router has registered, and the MAC vendor table identifies the Wi-Fi
+ * chip maker, which is not always the branded device (a Fire TV's Wi-Fi
+ * module can be made by a different company than Amazon).
+ */
+export function DiscoverHosts(): $CancellablePromise<$models.DiscoveredHost[]> {
+    return $Call.ByID(854323657).then(($result: any) => {
+        return $$createType2($result);
+    });
+}
+
+/**
  * GetDefaults returns sensible starting values for the form.
  */
 export function GetDefaults(): $CancellablePromise<$models.Config> {
     return $Call.ByID(2724249329).then(($result: any) => {
-        return $$createType1($result);
+        return $$createType3($result);
     });
 }
 
@@ -53,7 +69,7 @@ export function IsRunning(): $CancellablePromise<boolean> {
  */
 export function ListInterfaces(): $CancellablePromise<string[]> {
     return $Call.ByID(3857048213).then(($result: any) => {
-        return $$createType2($result);
+        return $$createType4($result);
     });
 }
 
@@ -63,7 +79,7 @@ export function ListInterfaces(): $CancellablePromise<string[]> {
  */
 export function LoadConfig(): $CancellablePromise<$models.Config> {
     return $Call.ByID(2822453907).then(($result: any) => {
-        return $$createType1($result);
+        return $$createType3($result);
     });
 }
 
@@ -121,5 +137,7 @@ export function StopServer(): $CancellablePromise<void> {
 
 // Private type creation functions
 const $$createType0 = $models.Tools.createFrom;
-const $$createType1 = $models.Config.createFrom;
-const $$createType2 = $Create.Array($Create.Any);
+const $$createType1 = $models.DiscoveredHost.createFrom;
+const $$createType2 = $Create.Array($$createType1);
+const $$createType3 = $models.Config.createFrom;
+const $$createType4 = $Create.Array($Create.Any);
